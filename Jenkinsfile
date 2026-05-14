@@ -11,7 +11,7 @@ pipeline {
     agent any
     environment {
         // Harbor 凭据（你 Jenkins 里的那个 Harbor 账号密码）
-        HARBOR_CREDS = credentials("你Harbor的凭据ID")
+        HARBOR_CREDS = credentials("harbor")
     }
     stages {
         stage('构建镜像') {

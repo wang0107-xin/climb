@@ -8,31 +8,28 @@ def TAG          = "latest"  // 也可以用 ${BUILD_NUMBER}
 
 // 最终完整镜像名
 def FULL_IMAGE = "${HARBOR_HOST}/${PROJECT_NAME}/${IMAGE_NAME}:${TAG}"
-
 pipeline {
     agent any
     environment {
-        // Harbor 凭据（你 Jenkins 里的那个 Harbor 账号密码）
+        FULL_IMAGE = "192.168.234.120/wang/flask-app:latest"
         HARBOR_CREDS = credentials("harbor")
     }
     stages {
         stage('构建镜像') {
             steps {
-                sh 'docker build -t ${FULL_IMAGE} .'
+                sh "docker build -t ${FULL_IMAGE} ."
             }
         }
         stage('推送到 Harbor') {
             steps {
-                sh 'docker login ${HARBOR_HOST} -u ${HARBOR_CREDS_USR} -p ${HARBOR_CREDS_PSW}'
-                sh 'docker push ${FULL_IMAGE}'
+                sh "docker login 192.168.234.120 -u ${HARBOR_CREDS_USR} -p ${HARBOR_CREDS_PSW}"
+                sh "docker push ${FULL_IMAGE}"
             }
         }
         stage('部署到 K8s') {
             steps {
-                sh '''
-                    kubectl apply -f deployment.yaml
-                    kubectl set image deployment/flask-app flask-app=${FULL_IMAGE}
-                '''
+                sh "kubectl apply -f deployment.yaml"
+                sh "kubectl set image deployment/flask-app flask-app=${FULL_IMAGE}"
             }
         }
     }

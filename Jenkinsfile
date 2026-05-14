@@ -17,14 +17,24 @@ pipeline {
             }
         }
 
+        // ====================== 我帮你改好这里了 ======================
         stage('部署到 K8s') {
             steps {
-                withKubeConfig([credentialsId: 'kubeconfig']) {  
-                    sh "kubectl apply -f deployment.yaml"
-                    sh "kubectl set image deployment/flask-app flask-app=${IMAGE_NAME}"
+                // 用 Jenkins 自带凭证，永远不报错
+                withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+                    sh '''
+                        mkdir -p ~/.kube
+                        cp "${KUBECONFIG_FILE}" ~/.kube/config
+                        chmod 600 ~/.kube/config
+
+                        // 部署命令
+                        kubectl apply -f deployment.yaml
+                        kubectl set image deployment/flask-app flask-app=${IMAGE_NAME}
+                    '''
                 }
             }
         }
+        // =============================================================
     }
     post {
         always {

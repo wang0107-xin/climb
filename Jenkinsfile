@@ -4,6 +4,8 @@ def PROJECT_NAME = "wang"
 def IMAGE_NAME   = "flask-app"
 def TAG          = "latest"  // 也可以用 ${BUILD_NUMBER}
 
+
+
 // 最终完整镜像名
 def FULL_IMAGE = "${HARBOR_HOST}/${PROJECT_NAME}/${IMAGE_NAME}:${TAG}"
 

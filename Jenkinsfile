@@ -2,7 +2,6 @@ def label = "jenkins-slave-${UUID.randomUUID().toString()}"
 
 
 
-
 podTemplate(
     label: label,
     containers: [

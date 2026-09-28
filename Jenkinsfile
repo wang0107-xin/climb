@@ -49,6 +49,7 @@ podTemplate(label: label, containers: [
       }
     }
 
+
     stage('构建并推送镜像') {
       container('docker') {
         withCredentials([usernamePassword(credentialsId: 'harbor',

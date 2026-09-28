@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wang-flask-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wang-flask-app
+  template:
+    metadata:
+      labels:
+        app: wang-flask-app
+    spec:
+      containers:
+      - name: wang-flask-app
+        # 这里的 tag 只是初始占位；Jenkinsfile 会通过
+        # kubectl set image 把它覆盖成 <git短SHA>
+        image: 192.168.234.120:80/wang/flask-app:latest
+        ports:
+        - containerPort: 5000
+
+        # config.py 里 SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL')，
+        # 不注入的话是 None，Flask-SQLAlchemy 启动即报错。
+        # 注意 .env 已被 .dockerignore 排除，容器里没有它
+        env:
+        - name: FLASK_ENV
+          value: production
+        # 4 个斜杠 = 绝对路径 /data/dev.db（3 个斜杠会被当成相对 instance/ 解析）
+        - name: DATABASE_URL
+          value: sqlite:////data/dev.db
+        # optional: true —— Secret 还没建也不会卡住 Pod，此时退回 config.py 里的默认值。
+        # 建好之后自动生效：
+        #   kubectl create secret generic wang-flask-app-secret --from-literal=secret-key='你的随机密钥'
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: wang-flask-app-secret
+              key: secret-key
+              optional: true
+
+        volumeMounts:
+        - name: data
+          mountPath: /data
+
+        # 探针打 "/" 路由（app/routes.py 里的 home()，不碰数据库）
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+      volumes:
+      - name: data
+        # emptyDir: Pod 重建数据就没了。SQLite 只适合单副本，
+        # 生产建议换成 PVC 或外部 PostgreSQL/MySQL
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wang-flask-app
+spec:
+  selector:
+    app: wang-flask-app
+  ports:
+  - port: 80
+    targetPort: 5000
+  type: NodePort

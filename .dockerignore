@@ -1,0 +1,27 @@
+# 绝对不能进镜像：.env 里有 SECRET_KEY / 数据库地址
+# 容器运行时通过 K8s 的 env / Secret 注入（见 deployment.yaml）
+.env
+.env.*
+
+# 本地虚拟环境、缓存、IDE
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+.pytest_cache
+.idea
+*.iml
+
+# 本地开发数据库与抓取产物，不要把开发数据打进镜像
+instance
+data
+
+# 与运行无关的仓库文件
+.git
+.gitignore
+Jenkinsfile
+deployment.yaml
+requirements.lock
+*.http
+*.md

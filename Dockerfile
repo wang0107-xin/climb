@@ -1,5 +1,5 @@
 # Python 3.9：与项目 .pyc 字节码版本（cpython-39）保持一致
-FROM python:3.9-slim
+FROM 192.168.234.120:80/library/python:3.9-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

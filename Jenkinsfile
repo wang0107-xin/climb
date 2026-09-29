@@ -310,8 +310,21 @@ podTemplate(label: label, namespace: 'devops', containers: [
         }
 
         // 4) 清工作区（阶段 0.2）
+        //    这一步必须包 try/catch，而且原因不是"怕万一"：
+        //    deleteDir() 以 jnlp 容器的身份执行（uid 1000 的 jenkins），而 reports/ 和
+        //    __pycache__ 是 python 容器建的 —— library/python:3.9-slim 默认以 root 跑。
+        //    uid 1000 既不能 chmod 也不能 unlink root 名下的文件，于是
+        //    "Operation not permitted" → CompositeIOException: Unable to delete ...
+        //    不收这个异常，它就会从 finally 里抛出去，把一次本该绿的构建判成 FAILURE。
+        //    收尾步骤的本分是收尾，不是否决构建结果 —— 和上面 1)2)3) 一个道理。
+        //    另外：工作区是 emptyDir，且每轮 label 都带随机 UUID（新 pod = 新 emptyDir），
+        //    所以即便真没删干净，Pod 一销毁也跟着没了，这一步失败没有任何后果。
         if (CLEAN_WORKSPACE) {
-          deleteDir()
+          try {
+            deleteDir()
+          } catch (e) {
+            echo "[warn] 清工作区失败（不影响构建结果）：${e}"
+          }
         }
       }
     }

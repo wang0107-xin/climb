@@ -1,0 +1,100 @@
+# QA 环境（阶段 0.4）
+#
+# 命名空间本身就是隔离手段，所以这里的 Deployment / Service / Secret 刻意和生产
+# （k8s.yaml）**同名**，Jenkinsfile 的参数就不用按环境分叉；真正隔开的是 namespace。
+#
+# 一次 apply 会连 Namespace 一起建出来，所以流水线里只需要一条 kubectl apply。
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: qa
+  labels:
+    purpose: qa
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wang-flask-app
+  namespace: qa
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wang-flask-app
+  template:
+    metadata:
+      labels:
+        app: wang-flask-app
+    spec:
+      containers:
+      - name: wang-flask-app
+        # 占位 tag，Jenkinsfile 会用 kubectl set image 覆盖成 <git短SHA>
+        image: 192.168.234.120:80/wang/flask-app:latest
+        ports:
+        - containerPort: 5000
+
+        env:
+        - name: FLASK_ENV
+          value: production
+        # 独立数据库：QA 自己的文件名 + 自己的 emptyDir + 自己的命名空间，三层都和生产分开。
+        # 4 个斜杠 = 绝对路径 /data/qa.db（3 个斜杠会被当成相对 instance/ 解析）
+        - name: DATABASE_URL
+          value: sqlite:////data/qa.db
+        # optional: true —— QA 的 Secret 还没建也不卡 Pod，此时退回 config.py 的默认值。
+        # 建法见 docs/stage0-runbook.md
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: wang-flask-app-secret
+              key: secret-key
+              optional: true
+
+        volumeMounts:
+        - name: data
+          mountPath: /data
+
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+
+        # 比生产压得更低：QA 是和 Jenkins / Harbor 抢同一台小机器的那个
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 300m
+            memory: 384Mi
+
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wang-flask-app
+  namespace: qa
+spec:
+  selector:
+    app: wang-flask-app
+  ports:
+  - port: 80
+    targetPort: 5000
+  # NodePort 方便你在浏览器里直接看 QA。
+  # 不写死 nodePort：小集群里固定端口容易被别的服务占掉，apply 直接失败。
+  # 查实际端口： kubectl get svc wang-flask-app -n qa
+  # 或者本地转发： kubectl port-forward -n qa svc/wang-flask-app 8080:80
+  type: NodePort

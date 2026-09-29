@@ -21,6 +21,11 @@ env/
 *.sqlite3
 instance/
 
+# ---- 抓取产物 ----
+# 本地跑一次抓取就会在 data/ 下堆一个 CSV，不挡一下 git status 就没法看了。
+# 已经跟踪的样例文件（data/douban_20260506_1648.csv）不受影响，会继续留在仓库里。
+data/*.csv
+
 # ---- IDE ----
 .idea/
 *.iml
@@ -29,3 +34,7 @@ instance/
 build/
 dist/
 *.log
+
+# ---- 流水线产物（Jenkins 去归档，不进仓库）----
+reports/
+.coverage

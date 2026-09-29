@@ -17,11 +17,22 @@ __pycache__
 instance
 data
 
+# 测试与流水线脚本：只在 Jenkins 的 pod 里跑，没必要进运行镜像
+tests
+ci
+docs
+pytest.ini
+requirements-dev.txt
+reports
+.coverage
+
+# 部署清单由 kubectl 直接读文件，不经过镜像
+k8s
+k8s.yaml
+
 # 与运行无关的仓库文件
 .git
 .gitignore
 Jenkinsfile
-deployment.yaml
-requirements.lock
 *.http
 *.md

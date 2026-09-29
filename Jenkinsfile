@@ -36,8 +36,8 @@ def projectDir    = '.'
 // 不在这张表里的分支（feature/* 之类）只构建、不部署 —— 这是刻意的，
 // 免得随便一个分支都能往生产推。
 def branchTargets = [
-  'dev' : [ns: 'qa',      manifest: 'k8s/qa/app.yaml', label: 'QA'],
-  'main': [ns: 'default', manifest: 'k8s.yaml',        label: '生产'],
+  'dev' : [ns: 'qa',      manifest: 'k8s/qa/app.yaml',   label: 'QA'],
+  'main': [ns: 'default', manifest: 'k8s/main/k8s.yaml', label: '生产'],
 ]
 
 // 阶段 0.3 镜像内网化。
@@ -78,7 +78,14 @@ def notify(String status, String branch, String imageTag) {
 }
 
 
-podTemplate(label: label, containers: [
+// agent Pod 的命名空间必须写死在这里。
+// 不写 namespace 时它跟随 Jenkins 云配置（那台配的是 default），而下面 serviceAccount 用的
+// 'jenkins' 住在 devops。K8s 的 ServiceAccount 准入要求 SA 和 Pod 同命名空间，对不上就直接
+// 拒绝创建 Pod（serviceaccount "jenkins" not found），构建卡在起 Pod 那一步、走不到后面的 stage。
+// 也不能图省事在 default 里再建一个同名 SA —— 0.3 的 harbor-pull 是挂在这个 SA 上的，
+// 两个命名空间各一个 jenkins 以后必然指错。
+// 定了 devops 之后，docs/stage0-runbook.md 里 0.3 那条 patch 的 <agent 命名空间> 就是 devops。
+podTemplate(label: label, namespace: 'devops', containers: [
   containerTemplate(name: 'jnlp', image: imgJnlp),
   // 本项目是 Python Flask。原来这里是 okteto/golang.1.17 + go build，
   // 但项目里没有任何 .go 文件，所以必然失败

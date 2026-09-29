@@ -28,7 +28,7 @@ reports
 
 # 部署清单由 kubectl 直接读文件，不经过镜像
 k8s
-k8s.yaml
+k8s/main/k8s.yaml
 
 # 与运行无关的仓库文件
 .git

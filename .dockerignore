@@ -1,5 +1,5 @@
 # 绝对不能进镜像：.env 里有 SECRET_KEY / 数据库地址
-# 容器运行时通过 K8s 的 env / Secret 注入（见 deployment.yaml）
+# 容器运行时通过 K8s 的 env / Secret 注入（见 k8s/main/k8s.yaml、k8s/qa/app.yaml）
 .env
 .env.*
 
@@ -26,9 +26,8 @@ requirements-dev.txt
 reports
 .coverage
 
-# 部署清单由 kubectl 直接读文件，不经过镜像
+# 部署清单由 kubectl 直接读文件，不经过镜像（一条 k8s 就够，整个目录都排除了）
 k8s
-k8s/main/k8s.yaml
 
 # 与运行无关的仓库文件
 .git

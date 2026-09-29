@@ -3,9 +3,10 @@
 代码里已经做完的部分不在这里重复。这份只写**必须在 Jenkins / Harbor / K8s 上手工做**的事，
 以及验收怎么跑。
 
-> 代词说明：下面命令里的 `<agent 命名空间>` 指 Jenkins 的 Kubernetes 云配置里给 agent Pod
-> 用的那个命名空间（`podTemplate` 里没写 namespace，所以跟随云配置，通常是 `jenkins` 或 `default`）。
-> 不确定就 `kubectl get pods -A | grep jnlp` 看一眼。
+> 代词说明：下面命令里的 `<agent 命名空间>` 指 agent Pod 落在哪个命名空间。**它的值现在是 `devops`** ——
+> `Jenkinsfile` 的 `podTemplate` 里写死了 `namespace: 'devops'`，和它用的 `serviceAccount: 'jenkins'`
+> 在同一个命名空间（K8s 要求 SA 和 Pod 同命名空间，对不上 Pod 直接创建不出来，见 0.1 的第二个 ⚠️）。
+> 要确认：`kubectl get pods -A | grep jnlp`。
 
 ---
 
@@ -56,6 +57,32 @@ commit message 一个 "5"），跑的是改名前的旧 Jenkinsfile —— maste
 
 `目标环境` 那行是 `仅构建，不部署` 就说明分支名没取到，或者分支不在表里。
 
+### ⚠️ agent Pod 的命名空间必须和 serviceAccount 成对
+
+**这个也真实踩过。** agent Pod 原先落在 `default` —— 因为 `podTemplate` 早先没写 `namespace`，
+就跟随云配置（那台配的是 `default`）；而 `serviceAccount` 写的是 `jenkins`，这个 SA 住在 `devops`。
+K8s 的 ServiceAccount 准入要求 **SA 和 Pod 同命名空间**，对不上就直接拒绝创建 Pod：
+
+```
+error looking up service account default/jenkins: serviceaccount "jenkins" not found
+```
+
+为什么以前没炸：实际跑上集群的那份 Jenkinsfile（master 上的旧版）**压根没有 `serviceAccount` 这一行**，
+用的就是 `default` 里自带的 SA。所以这个错误一直藏在新版文件里，直到切到 `dev` 分支才露出来 ——
+和上面 `origin/master` 是同一类问题：**配置里写的东西和它实际会跑的地方对不上，而且一直没跑到那条路径上。**
+
+现在的做法是在 `podTemplate` 里把两样写在一起：
+
+```groovy
+podTemplate(label: label, namespace: 'devops', serviceAccount: 'jenkins', containers: [...])
+```
+
+**写死比改云配置好**：改动只影响这一条流水线（云配置是所有任务共享的），而且命名空间和 SA 写在同一个地方，
+一眼能看出这俩是一对 —— 这个坑能藏这么久，恰恰是因为它们分别写在两处、没人对照过。
+
+**别这么修**：在 `default` 里再建一个叫 `jenkins` 的 SA 去凑。0.3 的 `harbor-pull` 就是挂在这个 SA 上的，
+两个命名空间各一个同名 SA，以后一定指错。
+
 ---
 
 ## 0.3 镜像内网化（不需要推任何镜像）
@@ -83,9 +110,9 @@ commit message 一个 "5"），跑的是改名前的旧 Jenkinsfile —— maste
      --docker-server=192.168.234.120:80 \
      --docker-username='<harbor 用户名>' \
      --docker-password='<harbor 密码>' \
-     -n <agent 命名空间>
+     -n devops
 
-   kubectl patch serviceaccount jenkins -n <agent 命名空间> \
+   kubectl patch serviceaccount jenkins -n devops \
      -p '{"imagePullSecrets":[{"name":"harbor-pull"}]}'
    ```
 
@@ -178,6 +205,7 @@ kubectl port-forward -n qa svc/wang-flask-app 8080:80
 | `k8s/qa/app.yaml` 的 `targetPort` 改成 5001 | 部署到 K8s | `rollout status` 超时 180s |
 | `app/services/crawler_service.py` 里去掉 `db.session.rollback()` | 单元测试 | `test_crawl_commit_failure_rolls_back` 失败 |
 | `execute_crawl` 的返回值改回 `return rec`（把 ORM 对象塞进缓存） | 单元测试 | `test_execute_crawl_returns_plain_dict_not_orm_object` 失败；冒烟打开真抓取时第二次调用也会红 |
+| `Jenkinsfile` 里 `podTemplate` 的 `namespace` 改成 `default`（和 `serviceAccount: 'jenkins'` 对不上） | 起 agent Pod（在「拉取代码」之前） | `serviceaccount "jenkins" not found`，Pod 创建被拒 |
 
 ### 2. 正常改动 → 绿，服务在 QA 可用
 
@@ -237,3 +265,10 @@ du -sh <jenkins 工作区目录>
   让流水线天天红。
 - **单元测试一律不碰外网**。真实网络会让流水线因为豆瓣改版或网络抖动而红，这种红没有
   信息量，只会让人学会忽略流水线。网络那部分专门留给冒烟。
+- **收尾四步都不许把构建搞红**（归档 / 通知 / 回收悬空镜像 / 清工作区）。"清工作区"这一步尤其需要
+  包 try/catch，而且不是"怕万一"：它以 `jnlp` 容器的身份执行（uid 1000 的 `jenkins`），而 `reports/`
+  和各处 `__pycache__` 是 `python`、`kubectl` 容器以 **root** 建的 —— uid 1000 既不能 chmod 也不能
+  unlink root 名下的文件，`deleteDir()` 必然报 `Operation not permitted`。不收这个异常，它会从
+  `finally` 里抛出去，把一次本该绿的构建判成 FAILURE（第一次跑新版流水线就是这么红的）。
+  工作区是 `emptyDir` 且每轮 Pod 都是新的（label 带随机 UUID），所以"没删干净"本身没有后果。
+  真要让它删干净，得在删之前先用 root 身份 `chmod -R a+rwX .` —— 现在不需要。

@@ -1,0 +1,27 @@
+{
+  "base_url": "http://127.0.0.1:5000",
+  "ok": true,
+  "checks": [
+    {
+      "name": "首页内容与 Content-Type 正确",
+      "ok": true,
+      "detail": "200，msg=Flask Crawler API Running"
+    },
+    {
+      "name": "未知路径返回 404",
+      "ok": true,
+      "detail": "404"
+    },
+    {
+      "name": "抓取接口异常分支返回 JSON",
+      "ok": true,
+      "detail": "500，error='__smoke_no_such_platform__'"
+    },
+    {
+      "name": "真实抓取两次（含缓存路径）",
+      "ok": true,
+      "skipped": true,
+      "detail": "未启用"
+    }
+  ]
+}

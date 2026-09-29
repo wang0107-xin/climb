@@ -1,0 +1,6 @@
+# 只在流水线的 python 容器里装，不进生产镜像（Dockerfile 只读 requirements.txt）
+# 版本按 Python 3.9 兼容性挑的：pytest 8.4 / pytest-cov 6.2 都还支持 3.9
+-r requirements.txt
+
+pytest==8.4.2
+pytest-cov==6.2.1

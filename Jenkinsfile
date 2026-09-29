@@ -215,7 +215,7 @@ podTemplate(label: label, namespace: 'devops', containers: [
           // 1) kubectl 容器：把"实际部署成了什么"落盘，顺便算出集群内的 Service 地址。
           //    同一 Pod 里各容器共享工作区，所以用文件把参数传给 python 容器。
           container('kubectl') {
-            withCredentials([file(credentialsId: 'kubeconfig-shengchan', variable: 'KUBECONFIG')]) {
+            withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
               dir(projectDir) {
                 // 不用 heredoc：Groovy 字符串里的缩进会让 heredoc 结束符匹配不上
                 sh """

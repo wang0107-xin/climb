@@ -12,7 +12,7 @@ def home():
 @log_request
 def crawl(platform):
     try:
-        rec = execute_crawl(platform)
-        return jsonify(rec.to_dict()), 201
+        # execute_crawl 返回的已经是拍平好的 dict（见那边的注释：缓存里不能放 ORM 对象）
+        return jsonify(execute_crawl(platform)), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500

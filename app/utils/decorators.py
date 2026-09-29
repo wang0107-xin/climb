@@ -15,7 +15,9 @@ def log_request(f):
             logger.info('Request success', extra={
                 'endpoint': request.endpoint,
                 'method': request.method,
-                'path': request.full_path,
+                # full_path 在没带查询串时会补一个孤零零的 '?'（'/crawl/douban?'）。
+                # 这个字段是要进日志、被断言的东西，别让它带这种噪音。
+                'path': request.full_path.rstrip('?'),
                 'duration_ms': duration,
                 'user': getattr(g, 'user', None)
             })

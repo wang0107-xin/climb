@@ -193,7 +193,7 @@ podTemplate(label: label, namespace: 'devops', containers: [
           echo "[跳过] 分支 ${branchName} 不在 branchTargets 里，只构建不部署"
         } else {
           container('kubectl') {
-            withCredentials([file(credentialsId: 'kubeconfig-shengchan', variable: 'KUBECONFIG')]) {
+            withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
               dir(projectDir) {
                 // KUBECONFIG 已经指向配置文件，kubectl 会自动读，不需要再 cp 到 ~/.kube/config
                 sh """

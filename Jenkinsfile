@@ -29,12 +29,15 @@ def k8sService    = 'wang-flask-app'
 def projectDir    = '.'
 
 // 阶段 0.1 分支指向：哪个分支部署到哪个环境。
+// 这张表要和**远端实际存在的分支**一致 —— 本仓库远端只有 dev 和 main（`git ls-remote --heads`）。
+// 别出于"保险"把 master 加回来：这个仓库早期默认分支叫 master，后来改成了 main，
+// 而 Jenkins 工作区里可能还留着陈旧的 origin/master 引用（git fetch 不带 --prune 不会清理
+// 已被删除的分支）。把它写进这张表，会让一个远端已经不存在的分支看起来还能构建。
 // 不在这张表里的分支（feature/* 之类）只构建、不部署 —— 这是刻意的，
 // 免得随便一个分支都能往生产推。
 def branchTargets = [
-  'dev'   : [ns: 'qa',      manifest: 'k8s/qa/app.yaml', label: 'QA'],
-  'main'  : [ns: 'default', manifest: 'k8s.yaml',        label: '生产'],
-  'master': [ns: 'default', manifest: 'k8s.yaml',        label: '生产'],
+  'dev' : [ns: 'qa',      manifest: 'k8s/qa/app.yaml', label: 'QA'],
+  'main': [ns: 'default', manifest: 'k8s.yaml',        label: '生产'],
 ]
 
 // 阶段 0.3 镜像内网化。

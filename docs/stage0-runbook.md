@@ -12,7 +12,7 @@
 ## 0.1 分支指向（Jenkins 任务侧）
 
 流水线里已经把「哪个分支去哪个环境」写死了（`Jenkinsfile` 顶部的 `branchTargets`）：
-`dev` → `qa` 命名空间，`main` / `master` → `default`，其它分支只构建不部署。
+`dev` → `qa` 命名空间，`main` → `default`（生产），其它分支只构建不部署。
 
 任务侧要配的只有一件事：**让它真的能拿到分支名**。
 
@@ -21,6 +21,29 @@
 - 如果坚持用普通流水线任务：`env.BRANCH_NAME` 是空的，流水线会退回读
   `checkout scm` 返回的 `GIT_BRANCH`。这时任务里 Branch Specifier 必须写成 `*/dev`
   或 `*/main`，否则同一个任务每次拉的分支不一样，"分支指向"就还是假的。
+
+### ⚠️ 一定要顺手做掉：清掉陈旧的 origin/master
+
+**这个坑真实发生过。** 一次构建"成功"了，但检出的是 `origin/master`（commit `4c51c60`，
+commit message 一个 "5"），跑的是改名前的旧 Jenkinsfile —— master 上有几个 stage、
+产出什么，全由旧文件说了算。绿了，但和你要验的 dev 上的改动毫无关系。
+
+成因是两件事叠在一起：
+
+1. 这个仓库早期默认分支叫 `master`，后来改成了 `main`，**远端已经把这个分支删了**
+   （`git ls-remote --heads` 现在只返回 `dev` 和 `main`）。
+2. Jenkins 那份克隆**不会自动清理已删除分支的引用** —— `git fetch` 不带 `--prune`，
+   `refs/remotes/origin/master` 就一直留着，指向那个旧提交。
+   于是任务配着 `*/master`（普通流水线任务的默认值）时，它"成功地"检出了一个
+   远端根本不存在的分支。
+
+做法二选一：
+
+- 任务配置 → Additional Behaviours → 加一条 **Wipe out repository & force clone**（推荐，长期有效）
+- 或者手动删掉工作区：`/var/jenkins_home/workspace/<任务名>` 和 `<任务名>@script` 两个目录
+
+**怎么确认检出对了**：构建日志里那行 `Checking out Revision ...` 括号里应该是 `origin/dev`
+（或 `origin/main`），不是 `origin/master`；后面 `Commit message:` 应该是你刚推的那条。
 
 **怎么确认生效**：构建日志开头会打印
 

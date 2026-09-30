@@ -103,7 +103,18 @@ def notify(String status, String branch, String imageTag) {
 // 也不能图省事在 default 里再建一个同名 SA —— 0.3 的 harbor-pull 是挂在这个 SA 上的，
 // 两个命名空间各一个 jenkins 以后必然指错。
 // 定了 devops 之后，docs/stage0-runbook.md 里 0.3 那条 patch 的 <agent 命名空间> 就是 devops。
-podTemplate(label: label, namespace: 'devops', containers: [
+//
+// podRetention: never() —— 构建一结束就把 agent Pod 删掉。
+// 不写这一行，插件默认是 `Always`（留着），于是每构建一次就在 devops 里堆一个
+// `Completed` 状态的 slave-xxx Pod；每个 Pod 还带着它的 emptyDir 工作区
+// （checkout 出来的代码 + __pycache__ + reports），一直占着节点磁盘 ——
+// 而这台机器最紧的就是磁盘。这就是验收「连续跑 10 次磁盘不持续增长」过不去的一半原因。
+//   never()     → 构建结束立刻删（现在选这个，小硬盘优先）
+//   minutes(5)  → 留 5 分钟让你进去看现场，之后自己走
+//   onFailure() → 只在红的构建上留现场
+// 如果这行报 `No such DSL method 'never' found`（这版插件没有该 DSL），
+// 就把这行删掉，去 Jenkins → 系统管理 → 云 → Kubernetes → Pod Retention 改成 Never。
+podTemplate(label: label, namespace: 'devops', podRetention: never(), containers: [
   containerTemplate(name: 'jnlp', image: imgJnlp),
   // 本项目是 Python Flask。原来这里是 okteto/golang.1.17 + go build，
   // 但项目里没有任何 .go 文件，所以必然失败
@@ -370,17 +381,31 @@ podTemplate(label: label, namespace: 'devops', containers: [
           }
         }
 
-        // 4) 清工作区（阶段 0.2）
-        //    这一步必须包 try/catch，而且原因不是"怕万一"：
-        //    deleteDir() 以 jnlp 容器的身份执行（uid 1000 的 jenkins），而 reports/ 和
+        // 4) 清工作区（阶段 0.2）：先用 root 把权限放宽，再删
+        //    为什么要两步 —— 实测踩过的：
+        //    deleteDir() 是以 jnlp 容器的身份执行的（uid 1000 的 jenkins），而 reports/ 和
         //    __pycache__ 是 python 容器建的 —— library/python:3.9-slim 默认以 root 跑。
         //    uid 1000 既不能 chmod 也不能 unlink root 名下的文件，于是
         //    "Operation not permitted" → CompositeIOException: Unable to delete ...
-        //    不收这个异常，它就会从 finally 里抛出去，把一次本该绿的构建判成 FAILURE。
-        //    收尾步骤的本分是收尾，不是否决构建结果 —— 和上面 1)2)3) 一个道理。
-        //    另外：工作区是 emptyDir，且每轮 label 都带随机 UUID（新 pod = 新 emptyDir），
-        //    所以即便真没删干净，Pod 一销毁也跟着没了，这一步失败没有任何后果。
+        //    所以第一步先用一个 root 容器把整个工作区改成谁都能动：
+        //      chmod -R a+rwX .      （X 只给目录加执行位 —— 删除要的是**父目录**可写，
+        //                             文件本身的权限位不影响 unlink，但统一放宽省得漏）
+        //    为什么用 python 容器做：它是 root，且它一定在（哪怕 RUN_UNIT_TESTS=false）。
+        //    docker / kubectl 也是 root，用哪个都行。
+        //    为什么不用 `rm -rf` 一把梭：那等于自己实现一遍 deleteDir，还得让 root 去删
+        //    自己脚下的 cwd；deleteDir 是 Jenkins 自己的收尾语义，能用就别替它。
+        //    两个 try/catch 各自独立：收尾步骤的本分是收尾，不是否决构建结果 ——
+        //    和上面 1)2)3) 一个道理（不收异常，它会从 finally 抛出去，把本该绿的构建判成 FAILURE）。
+        //    最后：即便真没删干净也没有后果 —— 工作区是 emptyDir，Pod 一销毁
+        //    （podRetention: never()）就跟着没了，最多留一行 [warn]。
         if (CLEAN_WORKSPACE) {
+          try {
+            container('python') {
+              sh 'chmod -R a+rwX .'
+            }
+          } catch (e) {
+            echo "[warn] 放宽工作区权限失败（继续尝试删除）：${e}"
+          }
           try {
             deleteDir()
           } catch (e) {

@@ -186,38 +186,45 @@ podTemplate(label: label, namespace: 'devops', containers: [
       }
 
 
-      // 阶段 2.1 + 2.2 + 2.3：静态分析与安全扫描。
+      // 阶段 2.1 + 2.2 + 2.3：静态分析与安全扫描，**放同一个并行块**。
       // 位置在"构建并推送镜像"之前 —— 这就是"左移"的含义：在产出制品之前先扫代码。
       //
-      // ⚠️ 现在是**串行**的，不是规划 2.3 里那个并行块。
-      //    2026-09-30 改的，原因是排查"agent 上线后流水线一步不走"：
-      //    parallel + container() 是这一版唯一新增的变量，先撤掉，让下一次卡住的
-      //    可能来源只剩一个。两个扫描各 1 秒左右，串起来等于不花时间。
-      //    跑绿 3 次之后按下面那段注释改回 parallel（结构没动，只是包一层）。
+      // 两者放一起不是图省事，是因为它们本来就该并行：互不依赖、都是秒级，
+      // 串起来只是白等。规划里也写着这一条 —— 它们要一起加，分两次加等于把并行结构
+      // 拆了再加回来。
+      //
+      // ⚠️ 并行 + container() 在个别 kubernetes-plugin 版本上会偶发卡死，所以这一组合
+      //    只被验证过**一次**（构建 #48 是串行版跑绿的，它没有验证并行）。
+      //    排查"agent 上线后流水线一步不走"时确认过：那次的病因在节点侧
+      //    （Pod 1000 秒起不来 + node body 不动），**根本没执行到这个 stage**。
+      //    所以不为此付"连绿 3 次"的代价，直接用一次构建验它：
+      //      绿   → 并行成立，留着；
+      //      卡住 → 把下面两个分支拆成串行（各起一个 container('python') 块），
+      //             那是已验证过的形态（#48）。两个扫描各 1 秒，串行不花时间。
       //
       // 观察期：ci/static_analysis.py 发现问题也返回 0，条数交给后面的「质量门禁」汇总，
       // 所以这里不会因为"代码有告警"而红。真正会红的是**工具自己没跑起来**（退出码非 0）——
       // 那种情况必须红：否则报告是空的，门禁会当成"这一环没启用"，一路绿着过去。
-      //
-      // 改回并行时，把下面两个 if 块收进 map 再套一层 parallel：
-      //   def scans = [:]
-      //   if (RUN_RUFF)   { scans['静态分析 ruff']   = { container('python') { dir(projectDir) { sh '...' } } } }
-      //   if (RUN_BANDIT) { scans['安全扫描 bandit'] = { container('python') { dir(projectDir) { sh '...' } } } }
-      //   parallel(scans)
-      stage('静态分析与安全扫描') {
-        if (RUN_RUFF) {
-          container('python') {
-            dir(projectDir) { sh 'python ci/static_analysis.py ruff' }
+      stage('静态分析与安全扫描（并行）') {
+        if (RUN_RUFF || RUN_BANDIT) {
+          def scans = [:]
+          if (RUN_RUFF) {
+            scans['静态分析 ruff'] = {
+              container('python') {
+                dir(projectDir) { sh 'python ci/static_analysis.py ruff' }
+              }
+            }
           }
-        } else {
-          echo '[跳过] RUN_RUFF=false'
-        }
-        if (RUN_BANDIT) {
-          container('python') {
-            dir(projectDir) { sh 'python ci/static_analysis.py bandit' }
+          if (RUN_BANDIT) {
+            scans['安全扫描 bandit'] = {
+              container('python') {
+                dir(projectDir) { sh 'python ci/static_analysis.py bandit' }
+              }
+            }
           }
+          parallel(scans)
         } else {
-          echo '[跳过] RUN_BANDIT=false'
+          echo "[跳过] RUN_RUFF=${RUN_RUFF}，RUN_BANDIT=${RUN_BANDIT}"
         }
       }
 

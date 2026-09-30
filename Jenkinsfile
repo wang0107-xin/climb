@@ -8,11 +8,11 @@ def label = "slave-${UUID.randomUUID().toString()}"
 // =====================================================================
 def MIRROR_AGENT_IMAGES   = false  // 三个 agent 容器是否也走 Harbor（先确认 Harbor 里有这 3 个镜像）
 def RUN_UNIT_TESTS        = true
-def RUN_RUFF              = true   // 阶段 2.1：静态分析（观察期只出报告，不阻断）
-def RUN_BANDIT            = true   // 阶段 2.2：安全扫描（观察期只出报告，不阻断）
+def RUN_RUFF              = true   // 阶段 2.1：静态分析（这个 stage 自己不阻断，但门禁会）
+def RUN_BANDIT            = true   // 阶段 2.2：安全扫描（同上）
 def RUN_SMOKE_TEST        = true
 def SMOKE_REAL_CRAWL      = false  // 冒烟是否真打两次抓取（第二次走缓存路径）：需要 QA 有公网出口，会慢 20s+
-def ENFORCE_QUALITY_GATE  = false  // 阶段 1.3：观察期只汇总不阻断，调好误报后改 true
+def ENFORCE_QUALITY_GATE  = true   // 阶段 1.3：2026-09-30 翻开关 —— 门禁表里任何一条 ❌ 从此真的把构建判红
 def ENABLE_NOTIFY         = false  // 阶段 1.4：通知渠道还没定，先关
 def CLEAN_WORKSPACE       = true   // 阶段 0.2：构建结束清工作区
 def PRUNE_DANGLING_IMAGES = true   // 阶段 1：回收被覆盖的旧镜像层

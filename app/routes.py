@@ -1,3 +1,5 @@
+import os  # 验收① 故意留的坏改动：没人用它，ruff 会报 F401（验完就删）
+
 from flask import Blueprint, jsonify
 
 from .services.crawler_service import execute_crawl

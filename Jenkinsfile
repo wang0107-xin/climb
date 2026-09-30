@@ -51,8 +51,17 @@ def branchTargets = [
 // 每组的公网坐标和 Harbor 坐标写在相邻两行、**tag 刻意保持一致**：
 // 翻这个开关时变的应该只是"从哪儿拉"，不该顺手把版本也换了。
 // （原来 docker 那行公网写 :latest、Harbor 写 27-cli，就是这种对不上的隐患。）
-// 顺带把 docker 从 :latest 钉成 27-cli：K8s 对 tag 为 latest 的镜像默认 imagePullPolicy=Always，
-// 等于**每次构建都去公网重新拉一遍**，和"内网化"的目标相反；钉住版本才会走 IfNotPresent 走缓存。
+//
+// docker 从 :latest 钉成 27-cli，理由是"同一个东西不能有两个答案"：
+// 否则出事时没人说得清跑的是哪个版本，升级也从来不是谁主动决定的。
+//
+// ⚠️ 但改 tag 是有代价的：节点上没有这个 tag，kubelet 就得现拉一次。
+//    实测踩过 —— 改成 27-cli 后第一次构建，容器卡在 ContainerCreating 十几分钟，
+//    插件等满 1000 秒超时、放弃、建了第二个 Pod 才好（那时镜像刚拉完，
+//    事件里写的已经是 already present on machine，看起来像"跟拉镜像无关"）。
+//    所以：tag 定下来就别来回改；非改不可，先在节点上把新镜像拉好（见 docs/stage0-runbook.md 0.3）。
+//    另外别拿"latest 会被强制 imagePullPolicy=Always"当理由 —— 实测这个 Pod 里四个容器
+//    都是插件自己设的 IfNotPresent，跟 tag 是不是 latest 无关。
 def imgPython  = "${registryUrl}/library/python:3.9-slim"
 def imgJnlp    = MIRROR_AGENT_IMAGES ? "${registryUrl}/library/inbound-agent:jdk21" : 'jenkins/inbound-agent:jdk21'
 def imgDocker  = MIRROR_AGENT_IMAGES ? "${registryUrl}/library/docker:27-cli"       : 'docker:27-cli'
@@ -176,36 +185,38 @@ podTemplate(label: label, namespace: 'devops', containers: [
       }
 
 
-      // 阶段 2.1 + 2.2 + 2.3：静态分析与安全扫描，**放同一个并行块**。
+      // 阶段 2.1 + 2.2 + 2.3：静态分析与安全扫描。
       // 位置在"构建并推送镜像"之前 —— 这就是"左移"的含义：在产出制品之前先扫代码。
       //
-      // 两者放一起不是图省事，是因为它们本来就该并行：互不依赖、都是秒级，
-      // 串起来只是白等。规划里也写着这一条 —— 它们要一起加，分两次加等于把并行结构
-      // 拆了再加回来。
+      // ⚠️ 现在是**串行**的，不是规划 2.3 里那个并行块。
+      //    2026-09-30 改的，原因是排查"agent 上线后流水线一步不走"：
+      //    parallel + container() 是这一版唯一新增的变量，先撤掉，让下一次卡住的
+      //    可能来源只剩一个。两个扫描各 1 秒左右，串起来等于不花时间。
+      //    跑绿 3 次之后按下面那段注释改回 parallel（结构没动，只是包一层）。
       //
       // 观察期：ci/static_analysis.py 发现问题也返回 0，条数交给后面的「质量门禁」汇总，
       // 所以这里不会因为"代码有告警"而红。真正会红的是**工具自己没跑起来**（退出码非 0）——
       // 那种情况必须红：否则报告是空的，门禁会当成"这一环没启用"，一路绿着过去。
-      stage('静态分析与安全扫描（并行）') {
-        if (RUN_RUFF || RUN_BANDIT) {
-          def scans = [:]
-          if (RUN_RUFF) {
-            scans['静态分析 ruff'] = {
-              container('python') {
-                dir(projectDir) { sh 'python ci/static_analysis.py ruff' }
-              }
-            }
+      //
+      // 改回并行时，把下面两个 if 块收进 map 再套一层 parallel：
+      //   def scans = [:]
+      //   if (RUN_RUFF)   { scans['静态分析 ruff']   = { container('python') { dir(projectDir) { sh '...' } } } }
+      //   if (RUN_BANDIT) { scans['安全扫描 bandit'] = { container('python') { dir(projectDir) { sh '...' } } } }
+      //   parallel(scans)
+      stage('静态分析与安全扫描') {
+        if (RUN_RUFF) {
+          container('python') {
+            dir(projectDir) { sh 'python ci/static_analysis.py ruff' }
           }
-          if (RUN_BANDIT) {
-            scans['安全扫描 bandit'] = {
-              container('python') {
-                dir(projectDir) { sh 'python ci/static_analysis.py bandit' }
-              }
-            }
-          }
-          parallel(scans)
         } else {
-          echo "[跳过] RUN_RUFF=${RUN_RUFF}，RUN_BANDIT=${RUN_BANDIT}"
+          echo '[跳过] RUN_RUFF=false'
+        }
+        if (RUN_BANDIT) {
+          container('python') {
+            dir(projectDir) { sh 'python ci/static_analysis.py bandit' }
+          }
+        } else {
+          echo '[跳过] RUN_BANDIT=false'
         }
       }
 

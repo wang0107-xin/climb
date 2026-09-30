@@ -68,6 +68,7 @@ def imgDocker  = MIRROR_AGENT_IMAGES ? "${registryUrl}/library/docker:27-cli"   
 def imgKubectl = MIRROR_AGENT_IMAGES ? "${registryUrl}/library/kubectl:latest"      : 'cnych/kubectl:latest'
 
 
+
 // 阶段 1.4 通知。默认不启用；渠道定下来后：
 //   1. Jenkins 里新建 secret text 凭据，ID 填 dingtalk-webhook，值是完整 webhook 地址
 //   2. 把 ENABLE_NOTIFY 改成 true

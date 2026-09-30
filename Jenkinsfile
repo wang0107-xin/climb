@@ -8,6 +8,8 @@ def label = "slave-${UUID.randomUUID().toString()}"
 // =====================================================================
 def MIRROR_AGENT_IMAGES   = false  // 三个 agent 容器是否也走 Harbor（先确认 Harbor 里有这 3 个镜像）
 def RUN_UNIT_TESTS        = true
+def RUN_RUFF              = true   // 阶段 2.1：静态分析（观察期只出报告，不阻断）
+def RUN_BANDIT            = true   // 阶段 2.2：安全扫描（观察期只出报告，不阻断）
 def RUN_SMOKE_TEST        = true
 def SMOKE_REAL_CRAWL      = false  // 冒烟是否真打两次抓取（第二次走缓存路径）：需要 QA 有公网出口，会慢 20s+
 def ENFORCE_QUALITY_GATE  = false  // 阶段 1.3：观察期只汇总不阻断，调好误报后改 true
@@ -44,11 +46,17 @@ def branchTargets = [
 // 基础镜像 Harbor 里已经有（library/python:3.9-slim），所以这里**不需要推任何镜像**，
 // 只是把引用指过去。三个 agent 容器默认还走公网：确认 Harbor 里有对应镜像后，
 // 把 MIRROR_AGENT_IMAGES 改成 true；那些镜像要能被拉下来，还需要
-// harbor-pull secret 挂在 jenkins 这个 ServiceAccount 上（见 docs/stage0-runbook.md）。
+// harbor-pull secret 挂在 jenkins 这个 ServiceAccount 上（见 docs/stage0-runbook.md 的 0.3）。
+//
+// 每组的公网坐标和 Harbor 坐标写在相邻两行、**tag 刻意保持一致**：
+// 翻这个开关时变的应该只是"从哪儿拉"，不该顺手把版本也换了。
+// （原来 docker 那行公网写 :latest、Harbor 写 27-cli，就是这种对不上的隐患。）
+// 顺带把 docker 从 :latest 钉成 27-cli：K8s 对 tag 为 latest 的镜像默认 imagePullPolicy=Always，
+// 等于**每次构建都去公网重新拉一遍**，和"内网化"的目标相反；钉住版本才会走 IfNotPresent 走缓存。
 def imgPython  = "${registryUrl}/library/python:3.9-slim"
 def imgJnlp    = MIRROR_AGENT_IMAGES ? "${registryUrl}/library/inbound-agent:jdk21" : 'jenkins/inbound-agent:jdk21'
-def imgDocker  = MIRROR_AGENT_IMAGES ? "${registryUrl}/library/docker:27-cli"      : 'docker:latest'
-def imgKubectl = MIRROR_AGENT_IMAGES ? "${registryUrl}/library/kubectl:latest"     : 'cnych/kubectl'
+def imgDocker  = MIRROR_AGENT_IMAGES ? "${registryUrl}/library/docker:27-cli"       : 'docker:27-cli'
+def imgKubectl = MIRROR_AGENT_IMAGES ? "${registryUrl}/library/kubectl:latest"      : 'cnych/kubectl:latest'
 
 
 // 阶段 1.4 通知。默认不启用；渠道定下来后：
@@ -164,6 +172,40 @@ podTemplate(label: label, namespace: 'devops', containers: [
           }
         } else {
           echo '[跳过] RUN_UNIT_TESTS=false'
+        }
+      }
+
+
+      // 阶段 2.1 + 2.2 + 2.3：静态分析与安全扫描，**放同一个并行块**。
+      // 位置在"构建并推送镜像"之前 —— 这就是"左移"的含义：在产出制品之前先扫代码。
+      //
+      // 两者放一起不是图省事，是因为它们本来就该并行：互不依赖、都是秒级，
+      // 串起来只是白等。规划里也写着这一条 —— 它们要一起加，分两次加等于把并行结构
+      // 拆了再加回来。
+      //
+      // 观察期：ci/static_analysis.py 发现问题也返回 0，条数交给后面的「质量门禁」汇总，
+      // 所以这里不会因为"代码有告警"而红。真正会红的是**工具自己没跑起来**（退出码非 0）——
+      // 那种情况必须红：否则报告是空的，门禁会当成"这一环没启用"，一路绿着过去。
+      stage('静态分析与安全扫描（并行）') {
+        if (RUN_RUFF || RUN_BANDIT) {
+          def scans = [:]
+          if (RUN_RUFF) {
+            scans['静态分析 ruff'] = {
+              container('python') {
+                dir(projectDir) { sh 'python ci/static_analysis.py ruff' }
+              }
+            }
+          }
+          if (RUN_BANDIT) {
+            scans['安全扫描 bandit'] = {
+              container('python') {
+                dir(projectDir) { sh 'python ci/static_analysis.py bandit' }
+              }
+            }
+          }
+          parallel(scans)
+        } else {
+          echo "[跳过] RUN_RUFF=${RUN_RUFF}，RUN_BANDIT=${RUN_BANDIT}"
         }
       }
 

@@ -92,32 +92,62 @@ podTemplate(label: label, namespace: 'devops', serviceAccount: 'jenkins', contai
 进这个容器的几十 MB 包，不产生新镜像。
 
 **可选的下一步**：把 `jnlp` / `docker` / `kubectl` 这三个 agent 容器的镜像也内网化。
-现在它们默认还从 Docker Hub 拉（`MIRROR_AGENT_IMAGES = false`）。要做的话：
+现在它们默认还从 Docker Hub 拉（`MIRROR_AGENT_IMAGES = false`）。要做三步：
 
-1. 确认 Harbor 里已经有（或镜像过来）这三个：
+#### 第 1 步：把三个镜像 retag 推进 Harbor
 
-   | 用途 | Harbor 路径 | 上游来源 |
-   |---|---|---|
-   | Jenkins agent | `library/inbound-agent:jdk21` | `jenkins/inbound-agent:jdk21` |
-   | 构建/推送镜像 | `library/docker:27-cli` | `docker:27-cli`（原来用的 `docker:latest`） |
-   | 部署与查状态 | `library/kubectl:latest` | `cnych/kubectl` |
+在**能同时访问 Docker Hub 和 Harbor** 的机器上跑（K8s 那台节点最省事，它本来就有 docker）：
 
-2. 建拉取凭据，并挂到 agent 用的 ServiceAccount 上 —— **挂 SA 这一步不能省**，
-   `jnlp` 容器也是靠这个 SA 拉镜像的：
+```bash
+docker login 192.168.234.120:80
 
-   ```bash
-   kubectl create secret docker-registry harbor-pull \
-     --docker-server=192.168.234.120:80 \
-     --docker-username='<harbor 用户名>' \
-     --docker-password='<harbor 密码>' \
-     -n devops
+docker pull jenkins/inbound-agent:jdk21
+docker tag  jenkins/inbound-agent:jdk21 192.168.234.120:80/library/inbound-agent:jdk21
+docker push 192.168.234.120:80/library/inbound-agent:jdk21
 
-   kubectl patch serviceaccount jenkins -n devops \
-     -p '{"imagePullSecrets":[{"name":"harbor-pull"}]}'
-   ```
+docker pull docker:27-cli
+docker tag  docker:27-cli 192.168.234.120:80/library/docker:27-cli
+docker push 192.168.234.120:80/library/docker:27-cli
 
-3. 把 `Jenkinsfile` 里的 `MIRROR_AGENT_IMAGES` 改成 `true`，看一眼能不能起 Pod。
-   起不来就把这个开关改回 `false`，流水线立刻恢复 —— 这就是留开关的意义。
+docker pull cnych/kubectl:latest
+docker tag  cnych/kubectl:latest 192.168.234.120:80/library/kubectl:latest
+docker push 192.168.234.120:80/library/kubectl:latest
+```
+
+**tag 必须和上面对齐** —— `Jenkinsfile` 里公网坐标和 Harbor 坐标的 tag 是刻意写成一样的，
+翻开关时变的只是"从哪儿拉"。改 tag 的话两边一起改，否则会出现"公网跑 v27、Harbor 跑 latest"这种
+事后没人说得清的情况。
+
+> 想放到别的 Harbor 项目（不是 `library`）也行，但那要同时改 `Jenkinsfile` 里那三行的路径，
+> 两处必须一致。
+
+#### 第 2 步：建拉取凭据，并挂到 agent 用的 ServiceAccount 上
+
+**挂 SA 这一步不能省**，`jnlp` 容器也是靠这个 SA 拉镜像的：
+
+```bash
+kubectl create secret docker-registry harbor-pull \
+  --docker-server=192.168.234.120:80 \
+  --docker-username='<harbor 用户名>' \
+  --docker-password='<harbor 密码>' \
+  -n devops
+
+kubectl patch serviceaccount jenkins -n devops \
+  -p '{"imagePullSecrets":[{"name":"harbor-pull"}]}'
+```
+
+#### 第 3 步：翻开关，看一眼能不能起 Pod
+
+把 `Jenkinsfile` 里的 `MIRROR_AGENT_IMAGES` 改成 `true`，推上去看构建能不能起 Pod。
+起不来就把这个开关改回 `false`，流水线立刻恢复 —— 这就是留开关的意义。
+
+**怎么确认真的走了 Harbor**：构建日志里 agent Pod 的事件不再是 `Pulling from docker.io`；
+或者构建期间在节点上看 `kubectl get pod -n devops` 里那个 `slave-xxxx` 的镜像名，
+前缀应该是 `192.168.234.120:80/library/`。
+
+**没做这一步会怎样**：什么都不会发生。三个 agent 容器继续从 Docker Hub 拉，
+唯一的影响是构建慢一点、以及节点上没网时起不来 Pod。所以它是"可选"，
+不阻塞阶段 0 / 1 / 2 —— 但做完之后 `02 构建制品` 那条"构建不依赖公网"才算真的成立。
 
 ---
 

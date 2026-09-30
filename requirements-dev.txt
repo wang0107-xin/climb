@@ -1,6 +1,13 @@
 # 只在流水线的 python 容器里装，不进生产镜像（Dockerfile 只读 requirements.txt）
-# 版本按 Python 3.9 兼容性挑的：pytest 8.4 / pytest-cov 6.2 都还支持 3.9
+# 版本按 Python 3.9 兼容性挑的：pytest 8.4 / pytest-cov 6.2 / ruff 0.16 / bandit 1.8 都还支持 3.9
 -r requirements.txt
 
 pytest==8.4.2
 pytest-cov==6.2.1
+
+# 阶段 2.1 静态分析。选它是因为"pip 一个包、秒级扫完"，替掉 SonarQube 的规范/坏味道那部分。
+# 规则集写死在 ruff.toml 里 —— 别让"基线有几条"跟着 ruff 的默认值走。
+ruff==0.16.9
+
+# 阶段 2.2 安全扫描。只做代码级 SAST，依赖 CVE 要另上 Trivy（那会多一个容器，阶段 3/4 再说）。
+bandit==1.8.6

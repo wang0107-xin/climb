@@ -10,6 +10,7 @@ env
 __pycache__
 *.py[cod]
 .pytest_cache
+.ruff_cache
 .idea
 *.iml
 
@@ -22,6 +23,7 @@ tests
 ci
 docs
 pytest.ini
+ruff.toml
 requirements-dev.txt
 reports
 .coverage

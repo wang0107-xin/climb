@@ -10,6 +10,8 @@
   coverage.xml  覆盖率
   deploy.env    部署后实际的镜像 / 副本数 / 重启次数（kubectl 容器写）
   smoke.json    节点冒烟结果
+  ruff.json     静态分析结果（ci/static_analysis.py 写，阶段 2.1）
+  bandit.json   安全扫描结果（ci/static_analysis.py 写，阶段 2.2）
 
 输出：reports/gate-summary.md（给人看）、reports/gate-summary.json（给机器看）
 退出码：非 --enforce 恒为 0；--enforce 且有启用的检查失败 → 1
@@ -126,6 +128,34 @@ def collect(min_coverage=None):
         checks.append(('节点冒烟', True, bool(s.get('ok')), detail))
     else:
         checks.append(('节点冒烟', False, True, '未产出 smoke.json'))
+
+    # ---- 静态分析 / 安全扫描（阶段 2.1 / 2.2）----
+    # 两份报告由 ci/static_analysis.py 归一化成同一个 schema，所以这里一个循环就够。
+    # 注意 detail 里不能用半角竖线 —— 它会把这行 markdown 表格切成两列。
+    for tool, name in (('ruff', '静态分析(ruff)'), ('bandit', '安全扫描(bandit)')):
+        report = REPORTS / f'{tool}.json'
+        if not report.exists():
+            checks.append((name, False, True, f'未产出 {tool}.json'))
+            continue
+
+        r = json.loads(report.read_text(encoding='utf-8'))
+        if r.get('error'):
+            # 有报告但工具没跑起来 —— 这是流水线的故障，不是"没启用"，必须判失败
+            checks.append((name, True, False, f'工具没跑起来：{r["error"]}'))
+            continue
+
+        items = r.get('items', [])
+        if not items:
+            checks.append((name, True, True, '0 条' + (f'；{r["note"]}' if r.get('note') else '')))
+            continue
+
+        # 摘要里给出"按规则码的分布 + 前几条的 file:line"：
+        # 阶段 2 的验收标准是"每类问题都能在报告里定位到具体文件行号"，所以行号要在门禁表里就能看见，
+        # 不能只给个数字让人再去翻 json。
+        head = '、'.join(f'{code} {n}' for code, n in list(r.get('by_code', {}).items())[:4])
+        where = '、'.join(f'{i["file"]}:{i["line"]}' for i in items[:3])
+        more = f'，等 {len(items)} 条' if len(items) > 3 else ''
+        checks.append((name, True, False, f'{len(items)} 条（{head}）；如 {where}{more}'))
 
     return checks
 

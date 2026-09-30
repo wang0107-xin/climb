@@ -1,6 +1,9 @@
-from .base import BaseCrawler
-from bs4 import BeautifulSoup
 import time
+
+from bs4 import BeautifulSoup
+
+from .base import BaseCrawler
+
 
 class WeiboCrawler(BaseCrawler):
     def fetch_data(self):

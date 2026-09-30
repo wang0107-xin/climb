@@ -1,16 +1,22 @@
 import csv
 from datetime import datetime
 from pathlib import Path
-from ..extensions import db, cache
-from ..models.result import CrawlResult
+
 from ..crawlers.base import BaseCrawler
+from ..extensions import cache, db
+from ..models.result import CrawlResult
 
 BASE = Path(__file__).parent.parent.parent
 DATA_DIR = BASE / 'data'
 DATA_DIR.mkdir(exist_ok=True)
 
 def save_to_csv(data, prefix):
-    fname = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+    # DTZ005：这里的 now() 不带时区是刻意的。这个时间戳只用来拼 CSV 文件名
+    # （形如 douban_20260506_1648.csv），是给人看的"本地几点抓的"。
+    # 改成 datetime.now(timezone.utc) 会让文件名变成 UTC 时间 —— 早上 9 点抓的会显示成
+    # 01 点，读文件名的人反而要多做一次换算。要改成带时区，得先有人拍板"这个文件名
+    # 该记哪个时区"，那是个产品决定，不是 lint 问题。
+    fname = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"  # noqa: DTZ005
     path = DATA_DIR / fname
     with open(path, 'w', encoding='utf-8', newline='') as f:
         if data:
@@ -47,6 +53,6 @@ def execute_crawl(platform: str):
         db.session.commit()
         # 必须在 app_context 里拍平：commit 之后属性已过期，出了上下文就读不到了
         return rec.to_dict()
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        raise e
+        raise

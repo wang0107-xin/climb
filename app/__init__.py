@@ -1,9 +1,12 @@
-from flask import Flask
 import logging
+
+from flask import Flask
 from pythonjsonlogger import jsonlogger
+
 from .config import config
-from .extensions import db, cache
+from .extensions import cache, db
 from .routes import bp
+
 
 def create_app(config_name='development'):
     app = Flask(__name__)

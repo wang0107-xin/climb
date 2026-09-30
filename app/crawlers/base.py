@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
 
 class BaseCrawler(ABC):
     def __init__(self, crawl_type='default'):

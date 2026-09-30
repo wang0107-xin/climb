@@ -75,7 +75,10 @@ def main():
             detail = fn()
             results.append({'name': name, 'ok': True, 'detail': detail})
             print(f'  OK  {name}：{detail}')
-        except Exception as e:  # 任何异常都算这条用例失败，不中断后面的
+        # 任何异常都算这条用例失败，不中断后面的。
+        # 显式声明盲吞（BLE001）：读报告的人需要一眼分清"这个 except 是偷懒"和
+        # "这个 except 是设计" —— 前者该修，后者该留。冒烟脚本必须要后者。
+        except Exception as e:  # noqa: BLE001
             detail = f'{type(e).__name__}: {e}'
             results.append({'name': name, 'ok': False, 'detail': detail})
             print(f'  !!  {name}：{detail}')

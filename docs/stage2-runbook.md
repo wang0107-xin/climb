@@ -46,6 +46,15 @@ python ci/quality_gate.py --enforce    # 门禁期：有失败项 rc=1
 
 前提是本地装了这两个包：`pip install -r requirements-dev.txt`。
 
+> **在中文 Windows 上要注意两件事**（在 CI 容器里都不会遇到）：
+> 1. `demo-project/.venv` 是 Python 3.9、只装了 ruff + bandit 的**静态分析专用** venv；
+>    跑单元测试要用**外层**那个 `oldclimb/.venv`（Python 3.13，有 pytest 和应用依赖）：
+>    `cd demo-project && ../.venv/Scripts/python.exe -m pytest`
+> 2. 想用 `pip install -r requirements-dev.txt` 装这个 venv，会连撞两堵墙：
+>    pip 22 用系统 locale（GBK）读这个 UTF-8 中文注释的文件 → `UnicodeDecodeError`（加 `PYTHONUTF8=1` 绕过）；
+>    `greenlet==3.2.5` 没有 cp39/win 的 wheel，要 MSVC 才编得出来。
+>    所以本地就用现成的 `.venv/Scripts/python.exe ci/static_analysis.py ruff`，别去补它。
+
 > 本地跑不需要 `reports/` 里其它文件。缺 `junit.xml` / `deploy.env` / `smoke.json` 时，
 > 门禁会把对应那几行标成 `—`（未产出），不当失败 —— 这是刻意的，
 > 免得"分支只构建不部署"或者单独跑一个环节时门禁凭空报红。
@@ -81,6 +90,27 @@ python ci/quality_gate.py --enforce    # 门禁期：有失败项 rc=1
 | `RUF012` | 1 | 类属性用了可变默认值 | 改 `ClassVar` 或挪进 `__init__` |
 | `TRY201` | 1 | `raise e` 写成 `raise` 更好 | 一行的事 |
 | `TRY300` | 1 | `return` 放在 `try` 里、建议挪到 `else` | 要人看，可能只是风格 |
+
+**2026-09-30：这 20 条已经全部清零，ruff 现在报 0 条。** 处置如下 —— 三种结果都出现了，
+正好印证了上面那句「判断结果有三种，不是只有改代码一种」：
+
+| 处置 | 条数 | 明细 |
+|---|---|---|
+| `ruff check --fix` 自动修 | 13 | 11 条 `I001` + `F401` + `F841` |
+| 加 `# noqa` + 写明理由 | 3 | `BLE001` ×2（路由的 HTTP 边界、冒烟脚本的「任何异常算这条用例失败」，都是刻意盲吞）、`DTZ005` ×1（CSV 文件名用本地时间是给人看的） |
+| 真改代码 | 4 | `TRY201` `raise e`→`raise`、`G201` `.error(exc_info=True)`→`.exception()`、`RUF012` 加 `ClassVar` 标注、`TRY300` 把 `return` 挪出 `try` |
+
+一条都没写进 `ruff.toml` 的 `ignore` —— `DTZ005` 用的是**行内** noqa，因为它只在那一个地方不适用，
+规则本身该继续对新代码生效（加了行内 noqa 之后，`RUF100` 还能在它变成多余时提醒你删掉）。
+
+`decorators.py` 里的 `TRY300` / `G201` / `F841` 是一处改动一起消掉的：**try 里只留「可能失败的那一句」**
+（调用业务函数），成功后的记账（算 duration、打日志、return）挪到外面。
+原来全塞在 `try` 里，等于把「记账」也算进「可能失败」的范围 —— 记账自己炸了会被那个 `except`
+当成业务失败再记一条 `Request failed`，日志里就出现两条互相矛盾的记录。
+
+> 顺带实证了一件事：`app/utils/decorators.py` 那个 `except` 分支在覆盖率报告里是**未覆盖**的。
+> 原因不是用例少，而是 `routes.py` 把异常全吞了 —— 异常根本穿不过 `log_request`。
+> 这直接决定了 2.4（可观测性 L1）该怎么写，见文末。
 
 **bandit 0 条**：跳过 `B104`（绑 `0.0.0.0`）之后，`app` + `wsgi.py` 里没有安全类问题。
 跳过 B104 的理由写在 `ci/static_analysis.py` 里：容器里绑 `127.0.0.1` 等于自绝于 Pod 之外，
@@ -120,15 +150,15 @@ python -m ruff check . --select 想加的族 --statistics
 
 升级顺序（**先让 ruff 归零，再开门禁**，否则第一次开 `ENFORCE_QUALITY_GATE` 就会红）：
 
-1. 把 20 条清掉。先跑 `python -m ruff check . --fix`（能自动改 16 条），剩下的按上表逐条判断。
-   **判断结果有三种，不是只有"改代码"一种**：
-   - 真问题 → 改代码
-   - 有意的写法（比如 `app/routes.py:17` 那条盲吞）→ 加 `# noqa: BLE001` 并写一句为什么
-   - 规则本身不适合（比如 `DTZ005` 对这个项目）→ 写进 `ruff.toml` 的 `ignore`
-2. 确认 `python ci/static_analysis.py ruff` 报 0 条、`bandit` 报 0 条。
-3. 把 `Jenkinsfile` 里的 `ENFORCE_QUALITY_GATE` 改成 `true`。
+1. ~~把 20 条清掉~~ **已完成（2026-09-30）**：`--fix` 自动修 **13** 条（当初这里写的 16 条是估的，
+   实际跑出来 13），剩下 7 条按上表逐条判断。清法见上面「基线」一节的清零记录。
+2. ~~确认 `python ci/static_analysis.py ruff` 报 0 条、`bandit` 报 0 条~~ **已完成**：本地和构建里都是 `ruff 0 / bandit 0`。
+3. 把 `Jenkinsfile` 里的 `ENFORCE_QUALITY_GATE` 改成 `true`。**← 只差这一步。**
    注意它是**整个门禁的开关**，不只是这两项 —— 打开之后，单元测试失败、副本没就绪、
    Pod 重启过这些会一起开始阻断（它们本来就该阻断，之前只是观察期）。
+   **翻开关之前先看门禁表里还有没有 ❌**：观察期里 `Pod 无重启` 报过「重启 1 次」。
+   观察期它只是个 ❌，翻成 `true` 之后它会**真的把构建判红**。
+   所以顺序是：先把那条 ❌ 查清（2.4 的 L1 就是干这个的），再翻开关。
 
 ---
 

@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from app.models.result import CrawlResult
 from app.services import crawler_service
 
-
 # ---------------- 首页 ----------------
 
 def test_home_returns_running_message(client):
